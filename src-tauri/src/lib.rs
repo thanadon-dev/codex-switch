@@ -11,7 +11,7 @@ use std::{
 use tauri::{
     menu::{Menu, MenuItem},
     tray::TrayIconBuilder,
-    AppHandle, Manager,
+    AppHandle, Emitter, Manager,
 };
 use uuid::Uuid;
 use walkdir::WalkDir;
@@ -125,6 +125,14 @@ fn write_json<T: Serialize>(path: &Path, value: &T) -> Result<(), String> {
     fs::write(path, content).map_err(|error| error.to_string())
 }
 
+fn quota_cache_path(app: &AppHandle, id: &str) -> Result<PathBuf, String> {
+    Ok(profile_home(app, id)?.join("quota-cache.json"))
+}
+
+fn cache_quota(app: &AppHandle, snapshot: &QuotaSnapshot) -> Result<(), String> {
+    write_json(&quota_cache_path(app, &snapshot.profile_id)?, snapshot)
+}
+
 fn decode_jwt_claims(token: &str) -> Option<Value> {
     let payload = token.split('.').nth(1)?;
     let bytes = URL_SAFE_NO_PAD.decode(payload).ok()?;
@@ -224,6 +232,15 @@ fn create_profile(app: AppHandle, input: CreateProfileInput) -> Result<ProfileVi
     if name.is_empty() {
         return Err("กรุณาตั้งชื่อโปรไฟล์".to_string());
     }
+    let import_source = if input.import_current {
+        let source = current_codex_home()?.join("auth.json");
+        if !source.exists() {
+            return Err("ไม่พบ auth.json ของ Codex ปัจจุบัน".to_string());
+        }
+        Some(source)
+    } else {
+        None
+    };
     let profile = Profile {
         id: Uuid::new_v4().simple().to_string(),
         name: name.to_string(),
@@ -234,11 +251,7 @@ fn create_profile(app: AppHandle, input: CreateProfileInput) -> Result<ProfileVi
     let home = profile_home(&app, &profile.id)?;
     fs::create_dir_all(&home).map_err(|error| error.to_string())?;
     save_profile(&app, &profile)?;
-    if input.import_current {
-        let source = current_codex_home()?.join("auth.json");
-        if !source.exists() {
-            return Err("ไม่พบ auth.json ของ Codex ปัจจุบัน".to_string());
-        }
+    if let Some(source) = import_source {
         fs::copy(source, home.join("auth.json")).map_err(|error| error.to_string())?;
     }
     Ok(profile_view(&app, profile))
@@ -409,7 +422,7 @@ async fn refresh_quota(app: AppHandle, id: String, mode: String) -> QuotaSnapsho
     } else {
         fetch_local(&app, &id)
     };
-    result.unwrap_or_else(|error| QuotaSnapshot {
+    let snapshot = result.unwrap_or_else(|error| QuotaSnapshot {
         profile_id: id,
         source: mode,
         plan: None,
@@ -418,7 +431,26 @@ async fn refresh_quota(app: AppHandle, id: String, mode: String) -> QuotaSnapsho
         fetched_at: Utc::now().timestamp(),
         stale: true,
         error: Some(error),
-    })
+    });
+    let _ = cache_quota(&app, &snapshot);
+    snapshot
+}
+
+#[tauri::command]
+fn get_cached_quotas(app: AppHandle) -> Result<Vec<QuotaSnapshot>, String> {
+    let mut snapshots = Vec::new();
+    for profile in list_profiles(app.clone())? {
+        let path = quota_cache_path(&app, &profile.profile.id)?;
+        if !path.exists() {
+            continue;
+        }
+        if let Ok(value) = read_json(&path) {
+            if let Ok(snapshot) = serde_json::from_value(value) {
+                snapshots.push(snapshot);
+            }
+        }
+    }
+    Ok(snapshots)
 }
 
 fn default_settings() -> Settings {
@@ -438,6 +470,53 @@ fn get_settings(app: AppHandle) -> Result<Settings, String> {
     serde_json::from_value(read_json(&path)?).map_err(|error| error.to_string())
 }
 
+async fn run_background_monitor(app: AppHandle) {
+    loop {
+        let settings = get_settings(app.clone()).unwrap_or_else(|_| default_settings());
+        let window_visible = app
+            .get_webview_window("main")
+            .and_then(|window| window.is_visible().ok())
+            .unwrap_or(false);
+        let foreground_delay = settings.refresh_seconds.clamp(30, 900);
+        let delay = if window_visible {
+            foreground_delay
+        } else {
+            foreground_delay.saturating_mul(3).clamp(180, 900)
+        };
+        if settings.live_quota_enabled {
+            if let Ok(profiles) = list_profiles(app.clone()) {
+                for profile in profiles.into_iter().filter(|item| item.signed_in) {
+                    let id = profile.profile.id;
+                    let snapshot = match fetch_live(&app, &id).await {
+                        Ok(snapshot) => snapshot,
+                        Err(live_error) => fetch_local(&app, &id).unwrap_or_else(|local_error| QuotaSnapshot {
+                            profile_id: id.clone(),
+                            source: "live".to_string(),
+                            plan: None,
+                            primary: None,
+                            secondary: None,
+                            fetched_at: Utc::now().timestamp(),
+                            stale: true,
+                            error: Some(format!("{live_error}; {local_error}")),
+                        }),
+                    };
+                    let _ = cache_quota(&app, &snapshot);
+                    let _ = app.emit("quota-updated", &snapshot);
+                }
+            }
+        }
+        tokio_sleep(delay).await;
+    }
+}
+
+async fn tokio_sleep(seconds: u64) {
+    tauri::async_runtime::spawn_blocking(move || {
+        std::thread::sleep(std::time::Duration::from_secs(seconds));
+    })
+    .await
+    .ok();
+}
+
 #[tauri::command]
 fn save_settings(app: AppHandle, settings: Settings) -> Result<(), String> {
     write_json(&app_root(&app)?.join("settings.json"), &settings)
@@ -447,6 +526,7 @@ fn save_settings(app: AppHandle, settings: Settings) -> Result<(), String> {
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_notification::init())
         .setup(|app| {
             let show = MenuItem::with_id(app, "show", "เปิด Codex Switch", true, None::<&str>)?;
             let quit = MenuItem::with_id(app, "quit", "ออก", true, None::<&str>)?;
@@ -466,6 +546,7 @@ pub fn run() {
                     _ => {}
                 })
                 .build(app)?;
+            tauri::async_runtime::spawn(run_background_monitor(app.handle().clone()));
             Ok(())
         })
         .on_window_event(|window, event| {
@@ -482,9 +563,46 @@ pub fn run() {
             login_profile,
             launch_profile,
             refresh_quota,
+            get_cached_quotas,
             get_settings,
             save_settings
         ])
         .run(tauri::generate_context!())
         .expect("error while running Codex Switch");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parses_live_quota_window() {
+        let value = serde_json::json!({
+            "used_percent": 42,
+            "limit_window_seconds": 18000,
+            "reset_at": 4_102_444_800_i64
+        });
+        let window = parse_window(Some(&value), true).expect("window should parse");
+        assert_eq!(window.used_percent, 42.0);
+        assert_eq!(window.window_minutes, Some(300));
+        assert_eq!(window.resets_at, Some(4_102_444_800));
+    }
+
+    #[test]
+    fn parses_local_quota_window() {
+        let value = serde_json::json!({
+            "used_percent": 18.5,
+            "window_minutes": 10080,
+            "resets_at": 4_103_049_600_i64
+        });
+        let window = parse_window(Some(&value), false).expect("window should parse");
+        assert_eq!(window.used_percent, 18.5);
+        assert_eq!(window.window_minutes, Some(10080));
+    }
+
+    #[test]
+    fn rejects_window_without_usage() {
+        let value = serde_json::json!({ "window_minutes": 300 });
+        assert!(parse_window(Some(&value), false).is_none());
+    }
 }

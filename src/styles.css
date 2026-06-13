@@ -1,6 +1,6 @@
 :root {
   font-family: Inter, "Segoe UI", system-ui, sans-serif;
-  color: oklch(0.22 0.02 255);
+  color: var(--ink);
   background: oklch(0.98 0.004 255);
   font-synthesis: none;
   text-rendering: optimizeLegibility;

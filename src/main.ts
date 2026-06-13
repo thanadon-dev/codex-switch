@@ -1,4 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
+import { isPermissionGranted, requestPermission, sendNotification } from "@tauri-apps/plugin-notification";
 import "./styles.css";
 
 type Profile = {
@@ -44,12 +46,14 @@ const state: {
   quotas: Map<string, QuotaSnapshot>;
   settings: Settings;
   refreshing: Set<string>;
+  notifiedLevels: Map<string, number>;
   timer?: number;
 } = {
   profiles: [],
   quotas: new Map(),
   settings: { liveQuotaEnabled: false, refreshSeconds: 60, minimizeToTray: true },
   refreshing: new Set(),
+  notifiedLevels: new Map(),
 };
 
 const app = document.querySelector<HTMLDivElement>("#app")!;
@@ -221,6 +225,7 @@ async function refreshProfile(id: string): Promise<void> {
       mode: state.settings.liveQuotaEnabled ? "live" : "local",
     });
     state.quotas.set(id, quota);
+    void notifyQuota(quota);
   } catch (error) {
     showToast(String(error), "error");
   } finally {
@@ -236,8 +241,25 @@ async function refreshAll(): Promise<void> {
 function scheduleRefresh(): void {
   if (state.timer) window.clearInterval(state.timer);
   state.timer = window.setInterval(() => {
-    if (document.visibilityState === "visible") void refreshAll();
+    if (!state.settings.liveQuotaEnabled && document.visibilityState === "visible") void refreshAll();
+    else if (document.visibilityState === "visible") render();
   }, state.settings.refreshSeconds * 1000);
+}
+
+async function notifyQuota(quota: QuotaSnapshot): Promise<void> {
+  const used = Math.max(quota.primary?.usedPercent ?? 0, quota.secondary?.usedPercent ?? 0);
+  const level = used >= 95 ? 2 : used >= 80 ? 1 : 0;
+  const previous = state.notifiedLevels.get(quota.profileId) ?? 0;
+  state.notifiedLevels.set(quota.profileId, level);
+  if (level === 0 || level <= previous) return;
+  let granted = await isPermissionGranted();
+  if (!granted) granted = (await requestPermission()) === "granted";
+  if (!granted) return;
+  const profile = state.profiles.find((item) => item.profile.id === quota.profileId);
+  sendNotification({
+    title: `โควตา ${profile?.profile.name ?? "Codex"} ใกล้เต็ม`,
+    body: `ใช้งานแล้ว ${Math.round(used)}% เปิด Codex Switch เพื่อตรวจสอบเวลารีเซ็ต`,
+  });
 }
 
 async function reloadProfiles(): Promise<void> {
@@ -325,6 +347,14 @@ async function initialize(): Promise<void> {
   try {
     state.settings = await invoke<Settings>("get_settings");
     await reloadProfiles();
+    const cached = await invoke<QuotaSnapshot[]>("get_cached_quotas");
+    cached.forEach((quota) => state.quotas.set(quota.profileId, quota));
+    render();
+    await listen<QuotaSnapshot>("quota-updated", ({ payload }) => {
+      state.quotas.set(payload.profileId, payload);
+      void notifyQuota(payload);
+      if (document.visibilityState === "visible") render();
+    });
     scheduleRefresh();
     if (state.profiles.length) void refreshAll();
   } catch (error) {
