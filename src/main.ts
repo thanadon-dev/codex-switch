@@ -166,22 +166,22 @@ function render(): void {
 function dialogs(): string {
   return `<dialog id="profile-dialog">
     <form method="dialog" id="profile-form">
-      <div class="dialog-heading"><div><h2 id="profile-dialog-title">เพิ่มโปรไฟล์</h2><p>แต่ละโปรไฟล์เก็บข้อมูลใน CODEX_HOME แยกกัน</p></div><button class="icon-button close-dialog" value="cancel" aria-label="ปิด">×</button></div>
+      <div class="dialog-heading"><div><h2 id="profile-dialog-title">เพิ่มโปรไฟล์</h2><p>แต่ละโปรไฟล์เก็บข้อมูลใน CODEX_HOME แยกกัน</p></div><button type="button" class="icon-button close-dialog" aria-label="ปิด">×</button></div>
       <input type="hidden" id="profile-id" />
       <label>ชื่อโปรไฟล์<input id="profile-name" required maxlength="40" placeholder="เช่น งาน หรือ ส่วนตัว" /></label>
       <label>โฟลเดอร์โปรเจกต์<input id="project-path" placeholder="D:\\Projects\\my-app (ไม่บังคับ)" /></label>
       <fieldset><legend>สีประจำโปรไฟล์</legend><div class="colors">${["#5965d8", "#16866b", "#c16a24", "#b34d70", "#596273"].map((color, index) => `<label><input type="radio" name="profile-color" value="${color}" ${index === 0 ? "checked" : ""}/><i style="background:${color}"></i></label>`).join("")}</div></fieldset>
       <label class="check-row" id="import-row"><input type="checkbox" id="import-current" checked /><span><strong>นำเข้าบัญชีปัจจุบัน</strong><small>คัดลอก auth.json จาก Codex ที่ใช้อยู่ในเครื่อง</small></span></label>
-      <div class="dialog-actions"><button class="button secondary" value="cancel">ยกเลิก</button><button class="button primary" id="save-profile" value="default">บันทึก</button></div>
+      <div class="dialog-actions"><button type="button" class="button secondary close-dialog">ยกเลิก</button><button type="submit" class="button primary" id="save-profile">บันทึก</button></div>
     </form>
   </dialog>
   <dialog id="settings-dialog">
     <form method="dialog" id="settings-form">
-      <div class="dialog-heading"><div><h2>ตั้งค่า</h2><p>ควบคุมความสดของข้อมูลและการทำงานเบื้องหลัง</p></div><button class="icon-button close-dialog" value="cancel" aria-label="ปิด">×</button></div>
+      <div class="dialog-heading"><div><h2>ตั้งค่า</h2><p>ควบคุมความสดของข้อมูลและการทำงานเบื้องหลัง</p></div><button type="button" class="icon-button close-dialog" aria-label="ปิด">×</button></div>
       <label class="check-row"><input type="checkbox" id="live-enabled" /><span><strong>Live quota</strong><small>ส่ง access token ไปยัง endpoint ของ OpenAI เพื่ออ่านโควตา</small></span></label>
       <label>ช่วงรีเฟรช<select id="refresh-seconds"><option value="30">30 วินาที</option><option value="60">1 นาที</option><option value="120">2 นาที</option><option value="300">5 นาที</option></select></label>
       <div class="notice"><strong>ข้อมูลสำคัญ</strong><p>Live quota ใช้ private endpoint ที่อาจเปลี่ยนได้ Codex Switch จะ fallback ไปยังข้อมูล Local เมื่อเรียกไม่สำเร็จ</p></div>
-      <div class="dialog-actions"><button class="button secondary" value="cancel">ยกเลิก</button><button class="button primary" id="save-settings" value="default">บันทึก</button></div>
+      <div class="dialog-actions"><button type="button" class="button secondary close-dialog">ยกเลิก</button><button type="submit" class="button primary" id="save-settings">บันทึก</button></div>
     </form>
   </dialog>`;
 }
@@ -268,6 +268,9 @@ async function reloadProfiles(): Promise<void> {
 }
 
 function bindEvents(): void {
+  document.querySelectorAll<HTMLButtonElement>(".close-dialog").forEach((button) => {
+    button.addEventListener("click", () => button.closest<HTMLDialogElement>("dialog")?.close());
+  });
   document.querySelector("#add-profile")?.addEventListener("click", () => openProfileDialog());
   document.querySelector("#empty-add")?.addEventListener("click", () => openProfileDialog());
   document.querySelector("#refresh-all")?.addEventListener("click", () => void refreshAll());

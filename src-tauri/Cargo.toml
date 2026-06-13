@@ -1,6 +1,6 @@
 [package]
 name = "codex-switch"
-version = "0.1.0"
+version = "0.1.1"
 description = "Lightweight Codex account and quota monitor"
 authors = ["thanadon-dev"]
 edition = "2021"
@@ -28,4 +28,3 @@ base64 = "0.22"
 walkdir = "2"
 chrono = { version = "0.4", features = ["serde"] }
 uuid = { version = "1", features = ["v4"] }
-
