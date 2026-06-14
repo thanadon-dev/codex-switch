@@ -112,6 +112,22 @@ fn current_codex_home() -> Result<PathBuf, String> {
     Ok(PathBuf::from(home).join(".codex"))
 }
 
+fn default_project_path() -> Result<String, String> {
+    let home = std::env::var_os("USERPROFILE")
+        .or_else(|| std::env::var_os("HOME"))
+        .ok_or_else(|| "ไม่พบโฟลเดอร์ผู้ใช้".to_string())?;
+    let projects = PathBuf::from(home).join("Projects");
+    fs::create_dir_all(&projects).map_err(|error| error.to_string())?;
+    Ok(projects.to_string_lossy().into_owned())
+}
+
+fn resolve_project_path(project_path: Option<String>) -> Result<Option<String>, String> {
+    match project_path.map(|value| value.trim().to_string()) {
+        Some(value) if !value.is_empty() => Ok(Some(value)),
+        _ => Ok(Some(default_project_path()?)),
+    }
+}
+
 fn read_json(path: &Path) -> Result<Value, String> {
     let content = fs::read_to_string(path).map_err(|error| error.to_string())?;
     serde_json::from_str(&content).map_err(|error| error.to_string())
@@ -245,7 +261,7 @@ fn create_profile(app: AppHandle, input: CreateProfileInput) -> Result<ProfileVi
         id: Uuid::new_v4().simple().to_string(),
         name: name.to_string(),
         color: input.color,
-        project_path: input.project_path.filter(|value| !value.trim().is_empty()),
+        project_path: resolve_project_path(input.project_path)?,
         created_at: Utc::now().timestamp(),
     };
     let home = profile_home(&app, &profile.id)?;
@@ -262,7 +278,7 @@ fn update_profile(app: AppHandle, input: UpdateProfileInput) -> Result<ProfileVi
     let mut profile = read_profile(&app, &input.id)?;
     profile.name = input.name.trim().to_string();
     profile.color = input.color;
-    profile.project_path = input.project_path.filter(|value| !value.trim().is_empty());
+    profile.project_path = resolve_project_path(input.project_path)?;
     save_profile(&app, &profile)?;
     Ok(profile_view(&app, profile))
 }
@@ -453,6 +469,11 @@ fn get_cached_quotas(app: AppHandle) -> Result<Vec<QuotaSnapshot>, String> {
     Ok(snapshots)
 }
 
+#[tauri::command]
+fn get_default_project_path() -> Result<String, String> {
+    default_project_path()
+}
+
 fn default_settings() -> Settings {
     Settings {
         live_quota_enabled: false,
@@ -564,6 +585,7 @@ pub fn run() {
             launch_profile,
             refresh_quota,
             get_cached_quotas,
+            get_default_project_path,
             get_settings,
             save_settings
         ])
@@ -604,5 +626,20 @@ mod tests {
     fn rejects_window_without_usage() {
         let value = serde_json::json!({ "window_minutes": 300 });
         assert!(parse_window(Some(&value), false).is_none());
+    }
+
+    #[test]
+    fn keeps_explicit_project_path() {
+        let value = resolve_project_path(Some("D:\\work".to_string())).expect("path should resolve");
+        assert_eq!(value.as_deref(), Some("D:\\work"));
+    }
+
+    #[test]
+    fn uses_projects_folder_when_project_path_is_blank() {
+        let value = resolve_project_path(None)
+            .expect("default path should resolve")
+            .expect("default path should exist");
+        assert!(value.ends_with("Projects"));
+        assert!(Path::new(&value).is_dir());
     }
 }

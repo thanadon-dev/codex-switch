@@ -71,7 +71,7 @@ h1, h2, p { margin: 0; }
 .error-text, .danger-text { color: var(--danger) !important; }
 .profile-menu { width: 164px; padding: 5px; border: 1px solid var(--border); border-radius: 10px; background: var(--surface); box-shadow: 0 6px 8px oklch(0.2 0.02 255 / .1); }
 .profile-menu:popover-open { position: fixed; inset: auto 28px auto auto; margin-top: 8px; }
-.profile-menu button { width: 100%; padding: 8px 9px; border: 0; border-radius: 6px; text-align: left; background: transparent; cursor: pointer; font-size: 12px; }
+.profile-menu button { width: 100%; padding: 8px 9px; border: 0; border-radius: 6px; color: var(--ink); text-align: left; background: transparent; cursor: pointer; font-size: 12px; }
 .profile-menu button:hover { background: var(--surface-2); }
 .spinning svg { animation: spin .8s linear infinite; }
 .empty-state { min-height: 320px; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; }
@@ -115,6 +115,7 @@ fieldset { margin: 15px 0 0; padding: 0; border: 0; }
   :root { --canvas: oklch(0.18 0.012 255); --surface: oklch(0.22 0.014 255); --surface-2: oklch(0.27 0.016 255); --ink: oklch(0.94 0.008 255); --muted: oklch(0.72 0.018 255); --border: oklch(0.32 0.018 255); }
   .privacy-banner, .notice { background: oklch(0.27 0.035 72); border-color: oklch(0.4 0.06 72); }
   .privacy-banner p, .notice p { color: oklch(0.8 0.055 72); }
+  .profile-menu button:not(.danger-text) { color: white; }
 }
 
 @media (prefers-reduced-motion: reduce) {

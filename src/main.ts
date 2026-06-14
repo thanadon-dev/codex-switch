@@ -48,12 +48,14 @@ const state: {
   refreshing: Set<string>;
   notifiedLevels: Map<string, number>;
   timer?: number;
+  defaultProjectPath: string;
 } = {
   profiles: [],
   quotas: new Map(),
   settings: { liveQuotaEnabled: false, refreshSeconds: 60, minimizeToTray: true },
   refreshing: new Set(),
   notifiedLevels: new Map(),
+  defaultProjectPath: "",
 };
 
 const app = document.querySelector<HTMLDivElement>("#app")!;
@@ -169,7 +171,7 @@ function dialogs(): string {
       <div class="dialog-heading"><div><h2 id="profile-dialog-title">เพิ่มโปรไฟล์</h2><p>แต่ละโปรไฟล์เก็บข้อมูลใน CODEX_HOME แยกกัน</p></div><button type="button" class="icon-button close-dialog" aria-label="ปิด">×</button></div>
       <input type="hidden" id="profile-id" />
       <label>ชื่อโปรไฟล์<input id="profile-name" required maxlength="40" placeholder="เช่น งาน หรือ ส่วนตัว" /></label>
-      <label>โฟลเดอร์โปรเจกต์<input id="project-path" placeholder="D:\\Projects\\my-app (ไม่บังคับ)" /></label>
+      <label>โฟลเดอร์โปรเจกต์<input id="project-path" placeholder="โฟลเดอร์เริ่มต้น" /></label>
       <fieldset><legend>สีประจำโปรไฟล์</legend><div class="colors">${["#5965d8", "#16866b", "#c16a24", "#b34d70", "#596273"].map((color, index) => `<label><input type="radio" name="profile-color" value="${color}" ${index === 0 ? "checked" : ""}/><i style="background:${color}"></i></label>`).join("")}</div></fieldset>
       <label class="check-row" id="import-row"><input type="checkbox" id="import-current" checked /><span><strong>นำเข้าบัญชีปัจจุบัน</strong><small>คัดลอก auth.json จาก Codex ที่ใช้อยู่ในเครื่อง</small></span></label>
       <div class="dialog-actions"><button type="button" class="button secondary close-dialog">ยกเลิก</button><button type="submit" class="button primary" id="save-profile">บันทึก</button></div>
@@ -195,7 +197,7 @@ function openProfileDialog(profile?: ProfileView): void {
   target.querySelector<HTMLHeadingElement>("#profile-dialog-title")!.textContent = profile ? "แก้ไขโปรไฟล์" : "เพิ่มโปรไฟล์";
   target.querySelector<HTMLInputElement>("#profile-id")!.value = profile?.profile.id ?? "";
   target.querySelector<HTMLInputElement>("#profile-name")!.value = profile?.profile.name ?? "";
-  target.querySelector<HTMLInputElement>("#project-path")!.value = profile?.profile.projectPath ?? "";
+  target.querySelector<HTMLInputElement>("#project-path")!.value = profile?.profile.projectPath ?? state.defaultProjectPath;
   target.querySelector<HTMLElement>("#import-row")!.hidden = Boolean(profile);
   if (profile) {
     const color = target.querySelector<HTMLInputElement>(`input[name=profile-color][value="${profile.profile.color}"]`);
@@ -349,6 +351,7 @@ function openSettings(): void {
 async function initialize(): Promise<void> {
   try {
     state.settings = await invoke<Settings>("get_settings");
+    state.defaultProjectPath = await invoke<string>("get_default_project_path");
     await reloadProfiles();
     const cached = await invoke<QuotaSnapshot[]>("get_cached_quotas");
     cached.forEach((quota) => state.quotas.set(quota.profileId, quota));
