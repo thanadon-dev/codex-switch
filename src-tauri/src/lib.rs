@@ -8,6 +8,12 @@ use std::{
     process::Command,
     time::SystemTime,
 };
+
+#[cfg(windows)]
+use std::os::windows::process::CommandExt;
+
+#[cfg(windows)]
+const CREATE_NEW_CONSOLE: u32 = 0x0000_0010;
 use tauri::{
     menu::{Menu, MenuItem},
     tray::TrayIconBuilder,
@@ -301,15 +307,26 @@ fn terminal_command(home: &Path, project: Option<&str>, login: bool) -> String {
     command
 }
 
+fn spawn_terminal(command: String) -> Result<(), String> {
+    let mut process = Command::new("cmd");
+    process.args(["/K", &command]);
+
+    #[cfg(windows)]
+    process.creation_flags(CREATE_NEW_CONSOLE);
+
+    process.spawn().map_err(|error| error.to_string())?;
+    Ok(())
+}
+
 #[tauri::command]
 fn login_profile(app: AppHandle, id: String) -> Result<(), String> {
     let profile = read_profile(&app, &id)?;
     let home = profile_home(&app, &id)?;
-    Command::new("cmd")
-        .args(["/C", "start", "", "cmd", "/K", &terminal_command(&home, profile.project_path.as_deref(), true)])
-        .spawn()
-        .map_err(|error| error.to_string())?;
-    Ok(())
+    spawn_terminal(terminal_command(
+        &home,
+        profile.project_path.as_deref(),
+        true,
+    ))
 }
 
 #[tauri::command]
@@ -319,11 +336,11 @@ fn launch_profile(app: AppHandle, id: String) -> Result<(), String> {
     if !home.join("auth.json").exists() {
         return Err("โปรไฟล์นี้ยังไม่ได้เข้าสู่ระบบ".to_string());
     }
-    Command::new("cmd")
-        .args(["/C", "start", "", "cmd", "/K", &terminal_command(&home, profile.project_path.as_deref(), false)])
-        .spawn()
-        .map_err(|error| error.to_string())?;
-    Ok(())
+    spawn_terminal(terminal_command(
+        &home,
+        profile.project_path.as_deref(),
+        false,
+    ))
 }
 
 fn parse_window(value: Option<&Value>, api_shape: bool) -> Option<QuotaWindow> {
@@ -641,5 +658,19 @@ mod tests {
             .expect("default path should exist");
         assert!(value.ends_with("Projects"));
         assert!(Path::new(&value).is_dir());
+    }
+
+    #[test]
+    fn builds_terminal_command_with_spaced_paths() {
+        let command = terminal_command(
+            Path::new(r"C:\Users\markt\AppData\Roaming\Codex Switch\profiles\main"),
+            Some(r"C:\Users\markt\My Projects"),
+            false,
+        );
+
+        assert_eq!(
+            command,
+            r#"set "CODEX_HOME=C:\Users\markt\AppData\Roaming\Codex Switch\profiles\main" && cd /d "C:\Users\markt\My Projects" && codex"#
+        );
     }
 }
