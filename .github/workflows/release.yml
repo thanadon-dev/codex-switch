@@ -28,6 +28,6 @@ jobs:
         with:
           tagName: ${{ github.ref_name }}
           releaseName: Codex Switch ${{ github.ref_name }}
-          releaseBody: ดูรายละเอียดการใช้งานและข้อจำกัดใน README
+          releaseBody: See the README for installation instructions, usage details, security notes, and current limitations.
           releaseDraft: false
           prerelease: false
