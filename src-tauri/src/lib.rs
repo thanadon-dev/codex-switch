@@ -298,18 +298,35 @@ fn delete_profile(app: AppHandle, id: String) -> Result<(), String> {
     Ok(())
 }
 
-fn terminal_command(home: &Path, project: Option<&str>, login: bool) -> String {
-    let mut command = format!("set \"CODEX_HOME={}\"", home.display());
-    if let Some(path) = project {
-        command.push_str(&format!(" && cd /d \"{}\"", path));
+fn terminal_arguments(login: bool) -> Vec<&'static str> {
+    let mut arguments = vec!["/D", "/K", "codex"];
+    if login {
+        arguments.push("login");
     }
-    command.push_str(if login { " && codex login" } else { " && codex" });
-    command
+    arguments
 }
 
-fn spawn_terminal(command: String) -> Result<(), String> {
-    let mut process = Command::new("cmd");
-    process.args(["/K", &command]);
+fn terminal_process(home: &Path, project: Option<&str>) -> Result<Command, String> {
+    let project = project
+        .map(PathBuf::from)
+        .unwrap_or(std::env::current_dir().map_err(|error| error.to_string())?);
+
+    if !project.is_dir() {
+        return Err(format!(
+            "ไม่พบโฟลเดอร์โปรเจกต์: {}",
+            project.display()
+        ));
+    }
+
+    let mut process = Command::new("cmd.exe");
+    process.env("CODEX_HOME", home).current_dir(project);
+
+    Ok(process)
+}
+
+fn spawn_terminal(home: &Path, project: Option<&str>, login: bool) -> Result<(), String> {
+    let mut process = terminal_process(home, project)?;
+    process.args(terminal_arguments(login));
 
     #[cfg(windows)]
     process.creation_flags(CREATE_NEW_CONSOLE);
@@ -322,11 +339,7 @@ fn spawn_terminal(command: String) -> Result<(), String> {
 fn login_profile(app: AppHandle, id: String) -> Result<(), String> {
     let profile = read_profile(&app, &id)?;
     let home = profile_home(&app, &id)?;
-    spawn_terminal(terminal_command(
-        &home,
-        profile.project_path.as_deref(),
-        true,
-    ))
+    spawn_terminal(&home, profile.project_path.as_deref(), true)
 }
 
 #[tauri::command]
@@ -336,11 +349,7 @@ fn launch_profile(app: AppHandle, id: String) -> Result<(), String> {
     if !home.join("auth.json").exists() {
         return Err("โปรไฟล์นี้ยังไม่ได้เข้าสู่ระบบ".to_string());
     }
-    spawn_terminal(terminal_command(
-        &home,
-        profile.project_path.as_deref(),
-        false,
-    ))
+    spawn_terminal(&home, profile.project_path.as_deref(), false)
 }
 
 fn parse_window(value: Option<&Value>, api_shape: bool) -> Option<QuotaWindow> {
@@ -661,16 +670,31 @@ mod tests {
     }
 
     #[test]
-    fn builds_terminal_command_with_spaced_paths() {
-        let command = terminal_command(
-            Path::new(r"C:\Users\markt\AppData\Roaming\Codex Switch\profiles\main"),
-            Some(r"C:\Users\markt\My Projects"),
-            false,
-        );
-
+    fn builds_terminal_arguments_without_shell_quoting() {
+        assert_eq!(terminal_arguments(false), vec!["/D", "/K", "codex"]);
         assert_eq!(
-            command,
-            r#"set "CODEX_HOME=C:\Users\markt\AppData\Roaming\Codex Switch\profiles\main" && cd /d "C:\Users\markt\My Projects" && codex"#
+            terminal_arguments(true),
+            vec!["/D", "/K", "codex", "login"]
         );
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn launches_codex_with_spaced_home_and_project_paths() {
+        let root = std::env::temp_dir().join("Codex Switch launcher test");
+        let home = root.join("Profile Home");
+        let project = root.join("Project Folder");
+        fs::create_dir_all(&home).expect("profile home should be created");
+        fs::create_dir_all(&project).expect("project folder should be created");
+
+        let output = terminal_process(&home, project.to_str())
+            .expect("terminal should be configured")
+            .args(["/D", "/C", "codex", "--version"])
+            .output()
+            .expect("codex should launch");
+
+        assert!(output.status.success());
+        assert!(String::from_utf8_lossy(&output.stdout).contains("codex-cli"));
+        fs::remove_dir_all(root).expect("test directory should be removed");
     }
 }
